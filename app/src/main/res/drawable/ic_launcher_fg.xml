@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.84" android:scaleY="0.84">
+    <!-- shell -->
+    <path android:fillColor="#FF2E2E34" android:pathData="M27,33h54a4,4 0 0,1 4,4v34a4,4 0 0,1 -4,4h-54a4,4 0 0,1 -4,-4v-34a4,4 0 0,1 4,-4z" />
+    <!-- bottom trapezoid -->
+    <path android:fillColor="#FF1C1C20" android:pathData="M39,75l3,-8h24l3,8z" />
+    <!-- label -->
+    <path android:fillColor="#FFECE4D2" android:pathData="M30,36h48a1.5,1.5 0 0,1 1.5,1.5v24a1.5,1.5 0 0,1 -1.5,1.5h-48a1.5,1.5 0 0,1 -1.5,-1.5v-24a1.5,1.5 0 0,1 1.5,-1.5z" />
+    <path android:fillColor="#FFFF8A3D" android:pathData="M28.5,46h51v15.5h-51z" />
+    <path android:fillColor="#FF1E2A66" android:pathData="M34,41.2h22v1.6h-22z" />
+    <!-- reels -->
+    <path android:fillColor="#FF121214" android:pathData="M43,53.7m-5.6,0a5.6,5.6 0 1,0 11.2,0a5.6,5.6 0 1,0 -11.2,0" />
+    <path android:fillColor="#FF121214" android:pathData="M65,53.7m-5.6,0a5.6,5.6 0 1,0 11.2,0a5.6,5.6 0 1,0 -11.2,0" />
+    <path android:fillColor="#FFE9E9E6" android:pathData="M43,53.7m-3.4,0a3.4,3.4 0 1,0 6.8,0a3.4,3.4 0 1,0 -6.8,0" />
+    <path android:fillColor="#FFE9E9E6" android:pathData="M65,53.7m-3.4,0a3.4,3.4 0 1,0 6.8,0a3.4,3.4 0 1,0 -6.8,0" />
+    <path android:fillColor="#FF121214" android:pathData="M43,53.7m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <path android:fillColor="#FF121214" android:pathData="M65,53.7m-1.5,0a1.5,1.5 0 1,0 3,0a1.5,1.5 0 1,0 -3,0" />
+    <!-- window -->
+    <path android:fillColor="#FF121214" android:pathData="M50,50.5h8a1,1 0 0,1 1,1v4.4a1,1 0 0,1 -1,1h-8a1,1 0 0,1 -1,-1v-4.4a1,1 0 0,1 1,-1z" />
+    </group>
+</vector>
