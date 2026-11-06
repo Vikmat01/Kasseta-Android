@@ -64,13 +64,20 @@ class Disc(private val g: Gfx, private val cases: Cases) {
         g.ring(c, dcx, dcy, r * 0.125f, r * 0.135f, C.argb(60, 0xFFFFFF))
     }
 
+    /** [compact] (portrait): bigger case, the disc slides out a shorter way so it all fits the width */
+    private fun caseWidth(vw: Float, vh: Float, compact: Boolean): Float =
+        if (compact) min(vw * 0.76f, vh * 0.96f / Cases.JEWEL_RATIO) else min(vw * 0.64f, vh * 0.96f / Cases.JEWEL_RATIO)
+
+    /** height the picture takes in a box */
+    fun height(vw: Float, vh: Float, compact: Boolean): Float = caseWidth(vw, vh, compact) * Cases.JEWEL_RATIO
+
     /** [out] 0 = disc inside the case, 1 = slid out */
-    fun draw(c: Canvas, vx: Float, vy: Float, vw: Float, vh: Float, cover: Bitmap?, name: String, angle: Float, out: Float) {
+    fun draw(c: Canvas, vx: Float, vy: Float, vw: Float, vh: Float, cover: Bitmap?, name: String, angle: Float, out: Float, compact: Boolean = false) {
         val o = out.coerceIn(0f, 1f)
-        val caseW = min(vw * 0.64f, vh * 0.96f / Cases.JEWEL_RATIO)
+        val caseW = caseWidth(vw, vh, compact)
         val caseH = caseW * Cases.JEWEL_RATIO
         val r = caseH * 0.43f
-        val travel = r * 1.25f
+        val travel = r * (if (compact) 0.84f else 1.25f)
         val groupW = caseW + travel * o
         val cx0 = vx + (vw - groupW) / 2
         val cy0 = vy + (vh - caseH) / 2

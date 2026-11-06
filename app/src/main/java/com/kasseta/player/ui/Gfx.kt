@@ -53,6 +53,8 @@ class Fonts(private val ctx: Context) {
     val semi = load("Golos-SemiBold.ttf", Typeface.DEFAULT_BOLD)
     val bold = load("Golos-Bold.ttf", Typeface.DEFAULT_BOLD)
     val hand = load("Caveat-SemiBold.ttf", Typeface.DEFAULT)
+    /** typewriter face for printed cassette labels */
+    val mono = load("PTMono-Regular.ttf", Typeface.MONOSPACE)
 }
 
 /** Drawing helpers shared by all screens. Sizes are in px; `d` = density. */
@@ -350,6 +352,16 @@ class Gfx(ctx: Context) {
 
     fun iconMenu(c: Canvas, cx: Float, cy: Float, s: Float, color: Int) {
         for (i in -1..1) circle(c, cx, cy + i * s * 0.30f, s * 0.085f, color)
+    }
+
+    /** speech bubble with lines of text */
+    fun iconLyrics(c: Canvas, cx: Float, cy: Float, s: Float, color: Int) {
+        val w = s * 0.86f; val h = s * 0.64f
+        val x0 = cx - w / 2; val y0 = cy - h / 2 - s * 0.06f
+        rrectStroke(c, x0, y0, w, h, s * 0.16f, s * 0.085f, color)
+        poly(c, color, x0 + w * 0.22f, y0 + h - s * 0.02f, x0 + w * 0.46f, y0 + h - s * 0.02f, x0 + w * 0.18f, y0 + h + s * 0.2f)
+        line(c, x0 + w * 0.24f, y0 + h * 0.36f, x0 + w * 0.76f, y0 + h * 0.36f, s * 0.08f, color)
+        line(c, x0 + w * 0.24f, y0 + h * 0.64f, x0 + w * 0.6f, y0 + h * 0.64f, s * 0.08f, color)
     }
 
     fun iconQueue(c: Canvas, cx: Float, cy: Float, s: Float, color: Int) {

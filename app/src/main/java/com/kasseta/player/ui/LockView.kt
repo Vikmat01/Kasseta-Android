@@ -122,7 +122,7 @@ class LockView(ctx: Context, private val onUnlock: () -> Unit) : View(ctx), Engi
                 val cw = min(vh * Cassette.CW / Cassette.CH, vw)
                 val ch = cw * Cassette.CH / Cassette.CW
                 val (st, tag) = tapeFor(tr)
-                cassette.draw(c, vx + (vw - cw) / 2, vy + (vh - ch) / 2, cw, prog, tr.title, "${tr.artist}  ·  ${tr.album}", reelL, reelR, st, tag)
+                cassette.draw(c, vx + (vw - cw) / 2, vy + (vh - ch) / 2, cw, prog, tr.title, "${tr.artist}  ·  ${tr.album}", reelL, reelR, st, tag, !tr.codec.startsWith("mp3"))
             }
         }
 

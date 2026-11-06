@@ -50,6 +50,8 @@ class TapeStyle(
 /** The cassette from the TrimUI version, ported to Canvas. Geometry is in "u" units (100.4 × 63.8). */
 class Cassette(private val g: Gfx) {
     companion object {
+        /** mock-ups only: overrides [printStyle] when >= 0 */
+        @JvmStatic var printStyleAll = -1
         const val CW = 100.4f
         const val CH = 63.8f
         private const val REEL_L = 29.2f
@@ -78,6 +80,41 @@ class Cassette(private val g: Gfx) {
     /** Type IV (hi-res): grey shell with a smoked window band and gold print, in the spirit of late-80s premium tapes */
     private val gold = C.hex(0xCBAA62)
 
+    /** true: the title is typed on the label (lossless and DSD), false: written by hand (MP3) */
+    private var printed = false
+    /** variant for the mock-ups: 0 typewriter, 1 typeset */
+    var printStyle = 0
+        get() = if (printStyleAll >= 0) printStyleAll else field
+
+    /** writes the title: by hand, or typed when [printed]; shrinks long titles, then cuts them */
+    private fun title(c: Canvas, u: Float, t: String, x: Float, y: Float, maxW: Float, size0: Float, minSize: Float, ink: Int) {
+        if (!printed) {
+            var size = size0
+            var ph = g.text(g.fonts.hand, size / g.sd, ink)
+            while (ph.measureText(t) > maxW && size > minSize) { size *= 0.94f; ph = g.text(g.fonts.hand, size / g.sd, ink) }
+            c.drawText(g.ellipsize(t, ph, maxW), x, y, ph)
+            return
+        }
+        // typed: smaller and slightly lower, so it sits on the line like a label strip
+        val face = if (printStyle == 0) g.fonts.mono else g.fonts.bold
+        var size = size0 * (if (printStyle == 0) 0.74f else 0.66f)
+        val min2 = minSize * 0.5f
+        var ph = g.text(face, size / g.sd, ink)
+        if (printStyle == 1) ph.letterSpacing = 0.02f
+        while (ph.measureText(t) > maxW && size > min2) { size *= 0.95f; ph = g.text(face, size / g.sd, ink); if (printStyle == 1) ph.letterSpacing = 0.02f }
+        if (printStyle == 0) {
+            // ink of a typewriter ribbon: a touch uneven
+            val txt = g.ellipsize(t, ph, maxW)
+            c.drawText(txt, x, y - 0.4f * u, ph)
+            ph.alpha = 70
+            c.drawText(txt, x + 0.12f * u, y - 0.32f * u, ph)
+            ph.alpha = 255
+        } else {
+            c.drawText(g.ellipsize(t, ph, maxW), x, y - 0.4f * u, ph)
+            ph.letterSpacing = 0f
+        }
+    }
+
     private fun drawSmoked(c: Canvas, u: Float, title: String, sub: String, tag: String) {
         val w = CW * u; val h = CH * u
         g.vgrad(c, 0f, 0f, w, h, 3.2f * u, C.hex(0x6A6B70), C.hex(0x56575B))
@@ -87,11 +124,7 @@ class Cassette(private val g: Gfx) {
         g.line(c, 4.6f * u, 15.0f * u, w - 4.6f * u, 15.0f * u, maxOf(1f, 0.2f * u), C.argb(70, 0xFFFFFF))
         g.line(c, 4.6f * u, 3.5f * u, w - 4.6f * u, 3.5f * u, maxOf(1f, 0.2f * u), C.argb(60, 0x000000))
         // handwritten title in a silver marker
-        val maxW = w - 22f * u
-        var size = 6.4f * u
-        var ph = g.text(g.fonts.hand, size / g.sd, C.hex(0xF2F2F0))
-        while (ph.measureText(title) > maxW && size > 4.6f * u) { size *= 0.94f; ph = g.text(g.fonts.hand, size / g.sd, C.hex(0xF2F2F0)) }
-        c.drawText(g.ellipsize(title, ph, maxW), 9f * u, 12.4f * u, ph)
+        title(c, u, title, 9f * u, 12.4f * u, w - 22f * u, 6.4f * u, 4.6f * u, C.hex(0xF2F2F0))
         // smoked window band
         val bx0 = 3.0f * u; val by0 = 16.4f * u; val bx1 = w - 3.0f * u; val by1 = 44.2f * u
         g.vgrad(c, bx0, by0, bx1 - bx0, by1 - by0, 0.8f * u, C.hex(0x1D1A17), C.hex(0x120F0D))
@@ -184,11 +217,7 @@ class Cassette(private val g: Gfx) {
         // dark pill around reels and window
         g.rrect(c, (REEL_L - 8.0f) * u, (REEL_Y - 8.0f) * u, (REEL_R - REEL_L + 16f) * u, 16f * u, 8f * u, retroDark)
         // handwritten title on the lines
-        val maxW = lx1 - 12f * u - 11f * u
-        var size = 6.6f * u
-        var ph = g.text(g.fonts.hand, size / g.sd, C.hex(0x1E2A66))
-        while (ph.measureText(title) > maxW && size > 4.8f * u) { size *= 0.94f; ph = g.text(g.fonts.hand, size / g.sd, C.hex(0x1E2A66)) }
-        c.drawText(g.ellipsize(title, ph, maxW), 11f * u, 15.1f * u, ph)
+        title(c, u, title, 11f * u, 15.1f * u, lx1 - 12f * u - 11f * u, 6.6f * u, 4.8f * u, C.hex(0x1E2A66))
         // tag
         val pt = g.text(g.fonts.bold, 2.3f * u / g.sd, C.hex(0x8C7550))
         pt.letterSpacing = 0.08f
@@ -286,11 +315,7 @@ class Cassette(private val g: Gfx) {
         ps.letterSpacing = 0f
         g.line(c, 53.5f * u, 15.6f * u, CW * u - 9.0f * u, 15.6f * u, maxOf(1f, 0.15f * u), C.hex(0xA5A5A7))
         // the title written on the shell by hand
-        val maxW = 52f * u
-        var size = 6.2f * u
-        var ph = g.text(g.fonts.hand, size / g.sd, C.hex(0x1E2A66))
-        while (ph.measureText(title) > maxW && size > 4.6f * u) { size *= 0.94f; ph = g.text(g.fonts.hand, size / g.sd, C.hex(0x1E2A66)) }
-        c.drawText(g.ellipsize(title, ph, maxW), 16.5f * u, 20.4f * u, ph)
+        title(c, u, title, 16.5f * u, 20.4f * u, 52f * u, 6.2f * u, 4.6f * u, C.hex(0x1E2A66))
         val pc = g.text(g.fonts.reg, 2.0f * u / g.sd, gray)
         pc.letterSpacing = 0.08f
         g.drawTextCenter(c, "CERAMIC COMPOSITE", w / 2, 33.6f * u, pc)
@@ -409,15 +434,7 @@ class Cassette(private val g: Gfx) {
         ps.letterSpacing = 0f
         // handwritten title
         // handwriting gets a bit smaller for long titles before it is cut
-        val maxW = lx1 - 22.0f * u - 16.8f * u
-        var size = 7.4f * u
-        var ph = g.text(g.fonts.hand, size / g.sd, st.ink)
-        while (ph.measureText(title) > maxW && size > 5.4f * u) {
-            size *= 0.94f
-            ph = g.text(g.fonts.hand, size / g.sd, st.ink)
-        }
-        val tt = g.ellipsize(title, ph, maxW)
-        c.drawText(tt, 16.8f * u, 15.2f * u, ph)
+        title(c, u, title, 16.8f * u, 15.2f * u, lx1 - 22.0f * u - 16.8f * u, 7.4f * u, 5.4f * u, st.ink)
         // bottom strip
         val pb = g.text(g.fonts.semi, 2.7f * u / g.sd, st.sub)
         g.drawTextCenter(c, sub, w / 2, 40.4f * u, pb, lx1 - lx0 - 8 * u)
@@ -460,13 +477,14 @@ class Cassette(private val g: Gfx) {
 
     fun draw(
         c: Canvas, x: Float, y: Float, w: Float, progress: Float, title: String, sub: String, reelL: Float, reelR: Float,
-        st: TapeStyle = TapeStyle.NORMAL, tag: String = "C·90",
+        st: TapeStyle = TapeStyle.NORMAL, tag: String = "C·90", typed: Boolean = false,
     ) {
         val u = w / CW
-        val key = "$title|$sub|${w.toInt()}|${st.name}|$tag"
+        val key = "$title|$sub|${w.toInt()}|${st.name}|$tag|$typed|$printStyle"
         var lay = layer
         if (lay == null || key != layerKey) {
             lay = Bitmap.createBitmap(ceil(CW * u).toInt() + 1, ceil(CH * u).toInt() + 1, Bitmap.Config.ARGB_8888)
+            printed = typed
             drawStatic(Canvas(lay), u, title, sub, st, tag)
             layer = lay; layerKey = key
         }

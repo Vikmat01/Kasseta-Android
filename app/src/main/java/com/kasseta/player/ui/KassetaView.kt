@@ -1725,79 +1725,125 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
 
     // ---------- player ----------
 
+    /** player: show the lyrics instead of the cassette / CD */
+    private var showLyrics = false
+    private var lyrScroll = -1f
+    private var lyrKey = ""
+    private var lyrManualUntil = 0L
+    private var lyrDragY = 0f
+    private var lyrDragStart = 0f
+    private var lyrDragMoved = false
+    private var lyrLast = 0L
+    private class LyrRow(val text: List<String>, val y: Float, val h: Float, val line: Int)
+    private var lyrRows: List<LyrRow> = emptyList()
+    private var lyrTotal = 0f
+
     private fun drawPlayer(c: Canvas) {
         val tr = engine.currentTrack()
         val w = width.toFloat()
         val y0 = insetTop
+        val landscape = width > height * 1.15f
+        val bottom = height - insetBottom - g.dp(if (landscape) 10f else 14f)
+        // landscape: the picture takes the whole left side, header and info live on the right
+        val vx: Float; val vy: Float; val vw: Float; val vh: Float
+        val ix0: Float; val ix1: Float
+        if (landscape) {
+            vx = insetLeft + g.dp(12f); vy = y0 + g.dp(10f)
+            vw = (w - insetLeft - insetRight) * 0.56f - g.dp(12f); vh = bottom - vy
+            ix0 = vx + vw + g.dp(24f); ix1 = w - insetRight - g.dp(22f)
+        } else {
+            vx = insetLeft + g.dp(6f); vw = w - insetLeft - insetRight - g.dp(12f)
+            vy = y0 + headerH + g.dp(2f)
+            vh = max(g.dp(150f), bottom - vy - g.dp(262f))
+            ix0 = padL; ix1 = padR
+        }
         // header
+        val hx0 = if (landscape) ix0 - g.dp(30f) else insetLeft
         val cy = y0 + headerH / 2
-        if (pressedKey == "back") g.circle(c, insetLeft + g.dp(28f), cy, g.dp(20f), C.SEL)
-        g.iconDown(c, insetLeft + g.dp(28f), cy, g.dp(22f), C.TEXT2)
-        hit(0f, y0, insetLeft + g.dp(56f), y0 + headerH, "back") { back() }
-        val hp = g.text(g.fonts.semi, 11.5f, C.TEXT3)
-        hp.letterSpacing = 0.12f
-        g.drawTextCenter(c, "СЕЙЧАС ИГРАЕТ", w / 2, cy - g.lineH(hp) / 2, hp)
-        hp.letterSpacing = 0f
-        val rx = insetLeft + g.dp(74f)
+        if (pressedKey == "back") g.circle(c, hx0 + g.dp(28f), cy, g.dp(20f), C.SEL)
+        g.iconDown(c, hx0 + g.dp(28f), cy, g.dp(22f), C.TEXT2)
+        hit(hx0, y0, hx0 + g.dp(52f), y0 + headerH, "back") { back() }
+        val rx = hx0 + g.dp(74f)
         if (pressedKey == "rotate") g.circle(c, rx, cy, g.dp(20f), C.SEL)
         g.iconRotate(c, rx, cy, g.dp(22f), !App.landscape, C.TEXT2)
         hit(rx - g.dp(22f), y0, rx + g.dp(22f), y0 + headerH, "rotate") { App.landscape = !App.landscape; host.applyOrientation() }
         val qx = width - insetRight - g.dp(76f)
+        val lx = qx - g.dp(46f)
+        val hp = g.text(g.fonts.semi, 11.5f, C.TEXT3)
+        hp.letterSpacing = 0.12f
+        if (!landscape) g.drawTextCenter(c, "СЕЙЧАС ИГРАЕТ", (rx + lx) / 2, cy - g.lineH(hp) / 2, hp, lx - rx - g.dp(44f))
+        hp.letterSpacing = 0f
         if (pressedKey == "queue") g.circle(c, qx, cy, g.dp(20f), C.SEL)
         g.iconQueue(c, qx, cy, g.dp(20f), C.TEXT2)
-        hit(qx - g.dp(24f), y0, qx + g.dp(24f), y0 + headerH, "queue") { push(Scr(Kind.QUEUE)) }
+        hit(qx - g.dp(22f), y0, qx + g.dp(22f), y0 + headerH, "queue") { push(Scr(Kind.QUEUE)) }
         menuButton(c, cy)
+        // lyrics button: bright when the song has lyrics, accent when they are shown
+        val lyr = tr?.let { com.kasseta.player.Lyrics.get(it) }
+        if (tr != null && !com.kasseta.player.Lyrics.loaded(tr)) com.kasseta.player.Lyrics.load(tr) { invalidate() }
+        val lyrOn = showLyrics && lyr != null
+        if (pressedKey == "lyrics") g.circle(c, lx, cy, g.dp(20f), C.SEL)
+        g.iconLyrics(c, lx, cy, g.dp(22f), if (lyrOn) C.ACCENT else if (lyr != null) C.TEXT2 else C.hex(0x3A3A40))
+        hit(lx - g.dp(22f), y0, lx + g.dp(22f), y0 + headerH, "lyrics") {
+            if (lyr == null) toast(if (tr != null && !com.kasseta.player.Lyrics.loaded(tr)) "Ищу текст…" else "У этой песни нет текста. Положите рядом файл .lrc с тем же именем")
+            else { showLyrics = !showLyrics; lyrScroll = -1f; invalidate() }
+        }
 
         if (tr == null) {
             g.drawTextCenter(c, "Ничего не играет", w / 2, height / 2f, g.text(g.fonts.semi, 18f, C.TEXT2))
             return
         }
-        val landscape = width > height * 1.15f
-        val bottom = height - insetBottom - g.dp(16f)
-        val vx: Float; val vy: Float; val vw: Float; val vh: Float
-        val ix0: Float; val ix1: Float; var iy: Float
-        if (landscape) {
-            vx = insetLeft + g.dp(16f); vy = y0 + headerH; vw = (w - insetLeft - insetRight) * 0.5f - g.dp(16f); vh = bottom - vy
-            ix0 = vx + vw + g.dp(24f); ix1 = w - insetRight - g.dp(24f)
-            iy = vy + max(0f, (vh - g.dp(250f)) / 2)
-        } else {
-            vx = insetLeft + g.dp(16f); vw = w - insetLeft - insetRight - g.dp(32f)
-            vy = y0 + headerH + g.dp(8f)
-            vh = min(vw * 0.68f, max(g.dp(150f), bottom - vy - g.dp(260f)))
-            ix0 = padL; ix1 = padR
-            iy = vy + vh + max(g.dp(18f), (bottom - vy - vh - g.dp(250f)) * 0.42f)
-        }
-
-        // visual: cassette ↔ CD cross-fade
         val albumIdx = App.albumOf(tr)
         val al = lib.albums.getOrNull(albumIdx)
         val title = tr.title
         val sub = "${tr.artist}  ·  ${tr.album.ifBlank { al?.name ?: "" }}"
         val prog = progress()
-        val va = viewAnim
-        if (va < 1f) {
+        // the part of the picture box actually used, so the info can sit right under it
+        val typed = !tr.codec.startsWith("mp3")
+        var usedTop = vy; var usedBot = vy + vh
+        if (lyrOn) {
+            drawLyricsPanel(c, lyr!!, vx, vy, vw, vh, landscape)
+        } else {
+            val va = viewAnim
             val cw = min(vh * Cassette.CW / Cassette.CH, vw)
             val chh = cw * Cassette.CH / Cassette.CW
-            val sc = 1f - 0.06f * va
+            // CD: in portrait a bigger case, the disc slides out a shorter way
+            val discCompact = !landscape
+            val tapeH = chh
+            val discH = disc.height(vw, vh, discCompact)
+            val usedH = (1f - va) * tapeH + va * discH
+            if (!landscape) { usedTop = vy + (vh - usedH) * 0.12f; usedBot = usedTop + usedH }
+            // portrait: the picture sits a bit above the middle of its box
+            val shiftY = if (landscape) 0f else usedTop - (vy + (vh - usedH) / 2)
             c.save()
-            c.scale(sc, sc, vx + vw / 2, vy + vh / 2)
-            if (va > 0f) c.saveLayerAlpha(vx - g.dp(8f), vy - g.dp(8f), vx + vw + g.dp(8f), vy + vh + g.dp(8f), ((1f - va) * 255).toInt())
-            val (style, tag) = tapeFor(tr)
-            cassette.draw(c, vx + (vw - cw) / 2, vy + (vh - chh) / 2, cw, prog, title, sub, reelL, reelR, style, tag)
-            if (va > 0f) c.restore()
+            c.translate(0f, shiftY)
+            if (va < 1f) {
+                val sc = 1f - 0.06f * va
+                c.save()
+                c.scale(sc, sc, vx + vw / 2, vy + vh / 2)
+                if (va > 0f) c.saveLayerAlpha(vx - g.dp(8f), vy - g.dp(8f), vx + vw + g.dp(8f), vy + vh + g.dp(8f), ((1f - va) * 255).toInt())
+                val (style, tag) = tapeFor(tr)
+                cassette.draw(c, vx + (vw - cw) / 2, vy + (vh - chh) / 2, cw, prog, title, sub, reelL, reelR, style, tag, typed)
+                if (va > 0f) c.restore()
+                c.restore()
+            }
+            if (va > 0f) {
+                val bmp = if (albumIdx >= 0) com.kasseta.player.Covers.get(lib, albumIdx, (min(vh * 0.94f, vw * 0.9f)).toInt()) else null
+                val sc = 0.94f + 0.06f * va
+                c.save()
+                c.scale(sc, sc, vx + vw / 2, vy + vh / 2)
+                if (va < 1f) c.saveLayerAlpha(vx - g.dp(8f), vy - g.dp(8f), vx + vw + g.dp(8f), vy + vh + g.dp(8f), (va * 255).toInt())
+                disc.draw(c, vx, vy, vw, vh, bmp, al?.name ?: tr.album, discAngle, discOut, discCompact)
+                if (va < 1f) c.restore()
+                c.restore()
+            }
             c.restore()
+            hit(vx, usedTop, vx + vw, usedBot, "visual") { App.cdView = !App.cdView; invalidate() }
         }
-        if (va > 0f) {
-            val bmp = if (albumIdx >= 0) com.kasseta.player.Covers.get(lib, albumIdx, (min(vh * 0.94f, vw * 0.58f)).toInt()) else null
-            val sc = 0.94f + 0.06f * va
-            c.save()
-            c.scale(sc, sc, vx + vw / 2, vy + vh / 2)
-            if (va < 1f) c.saveLayerAlpha(vx - g.dp(8f), vy - g.dp(8f), vx + vw + g.dp(8f), vy + vh + g.dp(8f), (va * 255).toInt())
-            disc.draw(c, vx, vy, vw, vh, bmp, al?.name ?: tr.album, discAngle, discOut)
-            if (va < 1f) c.restore()
-            c.restore()
-        }
-        hit(vx, vy, vx + vw, vy + vh, "visual") { App.cdView = !App.cdView; invalidate() }
+        // info block: right under the picture in portrait, centred on the right in landscape
+        val infoH = g.dp(250f)
+        var iy = if (landscape) max(y0 + headerH + g.dp(6f), y0 + headerH + (bottom - y0 - headerH - infoH) / 2)
+        else if (lyrOn) vy + vh + g.dp(16f)
+        else usedBot + min(g.dp(34f), max(g.dp(16f), (bottom - usedBot - infoH) * 0.4f))
 
         // titles
         val icx = (ix0 + ix1) / 2
@@ -1877,6 +1923,105 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         }
         g.iconRepeat(c, xs[4], ccy, g.dp(22f), rep == Engine.Repeat.ONE, if (rep != Engine.Repeat.OFF) C.ACCENT else C.TEXT2)
         if (rep != Engine.Repeat.OFF) g.circle(c, xs[4], ccy + g.dp(17f), g.dp(2f), C.ACCENT)
+    }
+
+    /** lyrics in the picture box: timed ones follow the song, plain ones scroll by finger */
+    private fun drawLyricsPanel(c: Canvas, lyr: com.kasseta.player.Lyrics, x: Float, y: Float, w: Float, h: Float, landscape: Boolean) {
+        val now = SystemClock.uptimeMillis()
+        val dt = if (lyrLast == 0L) 0f else min(0.1f, (now - lyrLast) / 1000f)
+        lyrLast = now
+        val tr = engine.currentTrack() ?: return
+        val pad = g.dp(14f)
+        val tw = w - 2 * pad
+        val size = if (landscape) 19f else 20f
+        val pBold = g.text(g.fonts.bold, size, C.TEXT)
+        val pNorm = g.text(g.fonts.semi, size, C.TEXT)
+        val lh = g.lineH(pBold)
+        val gap = g.dp(if (lyr.synced) 14f else 6f)
+        // layout (wrapped with the bold face so lines do not jump when they light up)
+        val key = "${tr.id}|${tw.toInt()}|$size"
+        if (key != lyrKey) {
+            var yy = 0f
+            val rows = ArrayList<LyrRow>()
+            for ((i, l) in lyr.lines.withIndex()) {
+                if (l.text.isEmpty()) {
+                    val hh = if (lyr.synced) lh * 0.6f else lh * 0.5f
+                    rows.add(LyrRow(emptyList(), yy, hh, i)); yy += hh + gap; continue
+                }
+                val parts = g.wrap(l.text, pBold, tw, 6)
+                val hh = parts.size * lh
+                rows.add(LyrRow(parts, yy, hh, i)); yy += hh + gap
+            }
+            lyrRows = rows; lyrTotal = yy; lyrKey = key; lyrScroll = -1f
+        }
+        val pos = if (scanDir != 0) scanPos.toLong() else if (seekDrag >= 0) (seekDrag * tr.durMs).toLong() else engine.positionMs()
+        val cur = lyr.lineAt(pos)
+        val maxScroll = max(0f, lyrTotal - h * 0.5f)
+        var animating = false
+        if (lyr.synced && now > lyrManualUntil) {
+            val row = lyrRows.getOrNull(max(0, cur))
+            val target = if (row == null) 0f else (row.y + row.h / 2 - h * 0.40f).coerceIn(-h * 0.40f, maxScroll)
+            if (lyrScroll < -h) lyrScroll = target
+            val d = target - lyrScroll
+            if (abs(d) > 0.5f) { lyrScroll += d * min(1f, dt * 7f); animating = true } else lyrScroll = target
+        } else {
+            if (lyrScroll < -h) lyrScroll = 0f
+            lyrScroll = lyrScroll.coerceIn(if (lyr.synced) -h * 0.4f else 0f, max(0f, lyrTotal - h + g.dp(24f)))
+        }
+        c.save()
+        c.clipRect(x, y, x + w, y + h)
+        for (row in lyrRows) {
+            val ry = y + g.dp(10f) + row.y - lyrScroll
+            if (ry + row.h < y || ry > y + h) continue
+            if (row.text.isEmpty()) {
+                if (lyr.synced && row.line == cur) {
+                    // instrumental pause: three soft dots
+                    for (k in 0..2) g.circle(c, x + w / 2 + (k - 1) * g.dp(12f), ry + row.h / 2, g.dp(3f), C.withAlpha(C.TEXT, 200))
+                }
+                continue
+            }
+            val alpha: Int; val paint: android.text.TextPaint
+            if (!lyr.synced) { alpha = 225; paint = pNorm }
+            else {
+                val dist = if (cur < 0) row.line + 1 else row.line - cur
+                alpha = when { dist == 0 -> 255; dist < 0 -> 70; dist == 1 -> 140; else -> 95 }
+                paint = if (dist == 0) pBold else pNorm
+            }
+            paint.color = C.withAlpha(if (lyr.synced && row.line == cur) C.TEXT else C.hex(0xC9C9CF), alpha)
+            for ((k, t) in row.text.withIndex()) {
+                val ly = ry + k * lh
+                if (landscape) g.drawText(c, t, x + pad, ly, paint) else g.drawTextCenter(c, t, x + w / 2, ly, paint)
+            }
+        }
+        c.restore()
+        // soft edges
+        val fe = g.dp(36f)
+        g.vgrad(c, x, y, w, fe, 0f, C.BG, C.withAlpha(C.BG, 0))
+        g.vgrad(c, x, y + h - fe, w, fe, 0f, C.withAlpha(C.BG, 0), C.BG)
+        // where the text came from
+        val sp = g.text(g.fonts.reg, 11f, C.TEXT3)
+        val note = if (lyr.synced) "Текст идёт за песней · ${lyr.source}" else "Текст · ${lyr.source}"
+        if (landscape) g.drawText(c, note, x + pad, y + h - g.lineH(sp), sp, w - 2 * pad)
+        else g.drawTextCenter(c, note, x + w / 2, y + h - g.lineH(sp), sp, w - 2 * pad)
+        // finger: drag scrolls (timed lyrics come back after 4 s), tap on a timed line jumps there
+        dragHit(x, y, x + w, y + h, "lyrpanel") { _, py, phase ->
+            when (phase) {
+                0 -> { lyrDragY = py; lyrDragStart = py; lyrDragMoved = false }
+                1 -> {
+                    if (abs(py - lyrDragStart) > g.dp(8f)) lyrDragMoved = true
+                    if (lyrDragMoved) { lyrScroll -= py - lyrDragY; lyrManualUntil = SystemClock.uptimeMillis() + 4000 }
+                    lyrDragY = py
+                }
+                2 -> if (!lyrDragMoved && lyr.synced) {
+                    val ly = py - y - g.dp(10f) + lyrScroll
+                    val row = lyrRows.firstOrNull { ly >= it.y - gap / 2 && ly <= it.y + it.h + gap / 2 }
+                    val l = row?.let { lyr.lines[it.line] }
+                    if (l != null && l.ms >= 0) { engine.seekTo(l.ms); lyrManualUntil = 0L }
+                }
+            }
+            invalidate()
+        }
+        if (animating || now < lyrManualUntil || engine.isPlaying) postInvalidateOnAnimation()
     }
 
     /** cassette type by audio quality */
