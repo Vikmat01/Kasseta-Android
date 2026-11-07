@@ -26,7 +26,7 @@ object Sfx {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build()
             ).build()
-        for (r in intArrayOf(R.raw.box_jewel, R.raw.box_tape, R.raw.tape_key, R.raw.tape_wind, R.raw.tape_stop)) ids[r] = p.load(ctx, r, 1)
+        for (r in intArrayOf(R.raw.box_jewel, R.raw.box_tape, R.raw.tape_key, R.raw.tape_wind, R.raw.tape_stop, R.raw.day_box)) ids[r] = p.load(ctx, r, 1)
         pool = p
     }
 
@@ -36,6 +36,14 @@ object Sfx {
         val id = ids[res] ?: return 0
         return p.play(id, vol, vol, 1, loop, rate)
     }
+
+    private var dayStream = 0
+
+    /** album of the day: cardboard flaps, the cases riffle, the chosen one comes out */
+    fun dayBox() { stopDayBox(); dayStream = play(R.raw.day_box) }
+
+    /** the animation was skipped or closed */
+    fun stopDayBox() { if (dayStream != 0) { pool?.stop(dayStream); dayStream = 0 } }
 
     fun boxOpen(jewel: Boolean) { play(if (jewel) R.raw.box_jewel else R.raw.box_tape) }
 

@@ -979,6 +979,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         }
         aodAlbum = ai
         aodStart = SystemClock.uptimeMillis()
+        Sfx.dayBox()
         App.aodSeen = App.today()
         invalidate()
     }
@@ -1015,7 +1016,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         return h + g.dp(12f)
     }
 
-    private fun closeAod() { aodStart = -1L; invalidate() }
+    private fun closeAod() { aodStart = -1L; Sfx.stopDayBox(); invalidate() }
 
     private fun drawAod(c: Canvas, now: Long): Boolean {
         if (aodStart < 0) return false
@@ -1043,6 +1044,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         if (t < dayBox.buttonsAt) {
             if (inside(dayBox.close) && t > 0.5f) { closeAod(); return }
             // tap skips the animation
+            Sfx.stopDayBox()
             aodStart = now - (dayBox.duration * 1000).toLong()
             invalidate()
             return

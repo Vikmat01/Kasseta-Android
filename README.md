@@ -101,3 +101,9 @@ GitHub Actions соберёт подписанный APK и опубликует
 - `Updater.kt` — проверка релизов на GitHub, загрузка и установка обновления.
 
 Лицензии: FFmpeg — LGPL 2.1 (`cpp/ffmpeg/COPYING.LGPLv2.1`), шрифты Golos и Caveat — OFL.
+
+## Звуки
+
+Звук «Альбома дня» сведён из записей с Freesound (CC0):
+[open-cardboard-box-compartment](https://freesound.org/people/newagesoup/sounds/364740/) (newagesoup) и
+[disc from case to cd player and press play_2](https://freesound.org/people/lartti/sounds/505382/) (lartti).
