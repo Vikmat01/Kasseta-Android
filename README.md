@@ -107,3 +107,4 @@ GitHub Actions соберёт подписанный APK и опубликует
 Звук «Альбома дня» сведён из записей с Freesound (CC0):
 [open-cardboard-box-compartment](https://freesound.org/people/newagesoup/sounds/364740/) (newagesoup) и
 [disc from case to cd player and press play_2](https://freesound.org/people/lartti/sounds/505382/) (lartti).
+Звук открытия jewel-кейса — из записи [Plastic CD case opening and closing](https://pixabay.com/sound-effects/film-special-effects-plastic-cd-case-opening-and-closing-104083/) (Pixabay Content License).

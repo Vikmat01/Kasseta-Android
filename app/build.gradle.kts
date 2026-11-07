@@ -18,8 +18,8 @@ android {
         applicationId = "com.kasseta.player"
         minSdk = 29          // Android 10
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5
+        versionName = "1.2.2"
         ndk {
             // HiFi players are ARM; the FFmpeg configuration is prepared for these two ABIs
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
