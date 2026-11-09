@@ -25,29 +25,35 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Release key
+        id: key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then echo "::error::Secret KEYSTORE_BASE64 is not set"; exit 1; fi
+          # without the signing key the APK would not install over the previous version: skip the build
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "::notice::Secret KEYSTORE_BASE64 is not set, skipping the build"; echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
           echo "$KEYSTORE_BASE64" | base64 -d > kasseta-release.jks
           printf "storeFile=kasseta-release.jks\nstorePassword=%s\nkeyAlias=kasseta\nkeyPassword=%s\n" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > keystore.properties
 
       - name: Build
+        if: steps.key.outputs.ok == 'true'
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --console=plain
 
       - name: Version
+        if: steps.key.outputs.ok == 'true'
         id: v
         run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Rename APK
+        if: steps.key.outputs.ok == 'true'
         run: cp app/build/outputs/apk/release/app-release.apk "Kasseta-${{ steps.v.outputs.tag }}.apk"
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.key.outputs.ok == 'true' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: Kasseta-${{ steps.v.outputs.tag }}.apk
