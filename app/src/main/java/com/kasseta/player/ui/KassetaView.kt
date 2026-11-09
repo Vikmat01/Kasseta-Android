@@ -95,6 +95,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
     /** handles the system back gesture; false = nothing left to close */
     fun back(): Boolean {
         if (aodStart >= 0) { closeAod(); return true }
+        if (picker != null && sheet == null) { picker = null; invalidate(); return true }
         if (sheet != null) { closeSheet(); return true }
         if (stack.size > 1) {
             trFrom = stack.removeAt(stack.size - 1)
@@ -424,6 +425,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         }
         animating = drawBox(c, now) || animating
         animating = drawAod(c, now) || animating
+        animating = drawPicker(c, now) || animating
         animating = drawToast(c, now) || animating
         animating = drawSheet(c, dt) || animating
         hits = building
@@ -1266,7 +1268,8 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
             val sg = if (d < 0) -1f else 1f
             val th = sg * a * 64f * PI.toFloat() / 180f
             val xoff = sg * (a * s * 0.64f + max(0f, abs(d) - 1f) * s * 0.2f)
-            val zoff = a * s * 0.42f
+            // pushed back far enough that the inner edge stays behind the front cover
+            val zoff = a * s * 0.66f
             val ct = kotlin.math.cos(th); val stt = kotlin.math.sin(th)
             val ys = if (reflect) floatArrayOf(s * 1.5f, s * 1.5f, s * 0.5f, s * 0.5f) else floatArrayOf(-s * 0.5f, -s * 0.5f, s * 0.5f, s * 0.5f)
             val xs = floatArrayOf(-s * 0.5f, s * 0.5f, s * 0.5f, -s * 0.5f)
@@ -1901,7 +1904,12 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         if (pressedKey == "lyrics") g.circle(c, lx, cy, g.dp(20f), C.SEL)
         g.iconLyrics(c, lx, cy, g.dp(22f), if (lyrOn) C.ACCENT else if (lyr != null) C.TEXT2 else C.hex(0x3A3A40))
         hit(lx - g.dp(22f), y0, lx + g.dp(22f), y0 + headerH, "lyrics") {
-            if (lyr == null) toast(if (tr != null && !com.kasseta.player.Lyrics.loaded(tr)) "Ищу текст…" else "У этой песни нет текста. Положите рядом файл .lrc с тем же именем")
+            if (lyr == null) {
+                if (tr != null && !com.kasseta.player.Lyrics.loaded(tr)) toast("Ищу текст…")
+                else if (tr != null) openSheet(Sheet("Текста нет", "Рядом с песней нет файла .lrc, и в тегах текста тоже нет", listOf(
+                    SheetItem("Найти текст в интернете") { openLyricsPicker(tr) },
+                ), closeOnTap = true))
+            }
             else { showLyrics = !showLyrics; lyrScroll = -1f; invalidate() }
         }
 
@@ -2241,6 +2249,225 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         hit(cx - bw / 2, y, cx + bw / 2, y + bh, "rescan") { App.rescan(false) }
     }
 
+    // ---------- cover / lyrics search on the internet ----------
+
+    private class Picker(val lyrics: Boolean, val title: String, val sub: String, val ai: Int, val track: Track?) {
+        /** 0 searching, 1 results, 2 nothing found, 3 no connection */
+        var state = 0
+        var covers: List<com.kasseta.player.Online.CoverHit> = emptyList()
+        var texts: List<com.kasseta.player.Online.LyricsHit> = emptyList()
+        var scroll = 0f
+        var maxScroll = 0f
+        var saving = -1
+        var dragY = 0f
+        var dragStart = 0f
+        var moved = false
+        /** tappable results; taps go through the scroll handler so dragging over a result scrolls */
+        val taps = ArrayList<Pair<FloatArray, () -> Unit>>()
+    }
+    private var picker: Picker? = null
+    private var pickTapX = 0f
+
+    private fun openCoverPicker(ai: Int) {
+        val al = lib.albums.getOrNull(ai) ?: return
+        val p = Picker(false, "Обложка из интернета", "${al.name} · ${al.artist}", ai, null)
+        picker = p
+        com.kasseta.player.Online.findCovers(al.artist, al.name, { hits ->
+            if (picker !== p) return@findCovers
+            p.covers = hits ?: emptyList()
+            p.state = when { hits == null -> 3; hits.isEmpty() -> 2; else -> 1 }
+            invalidate()
+        }) { invalidate() }
+        invalidate()
+    }
+
+    private fun openLyricsPicker(t: Track) {
+        val p = Picker(true, "Текст из интернета", "${t.title} · ${t.artist}", -1, t)
+        picker = p
+        com.kasseta.player.Online.findLyrics(t) { hits ->
+            if (picker !== p) return@findLyrics
+            p.texts = hits ?: emptyList()
+            p.state = when { hits == null -> 3; hits.isEmpty() -> 2; else -> 1 }
+            invalidate()
+        }
+        invalidate()
+    }
+
+    private fun drawPicker(c: Canvas, now: Long): Boolean {
+        val p = picker ?: return false
+        p.taps.clear()
+        val w = width.toFloat(); val h = height.toFloat()
+        g.fill.color = C.BG
+        c.drawRect(0f, 0f, w, h, g.fill)
+        hit(0f, 0f, w, h, "pickbg") { }
+        val x0 = insetLeft + g.dp(20f); val x1 = w - insetRight - g.dp(20f)
+        // header
+        val top = insetTop
+        val cy = top + headerH / 2
+        val bx = insetLeft + g.dp(28f)
+        if (pressedKey == "pickclose") g.circle(c, bx, cy, g.dp(20f), C.SEL)
+        g.iconClose(c, bx, cy, g.dp(18f), C.TEXT2)
+        hit(insetLeft, top, insetLeft + g.dp(56f), top + headerH, "pickclose") { picker = null; invalidate() }
+        val tp = g.text(g.fonts.bold, 18f, C.TEXT)
+        val sp = g.text(g.fonts.reg, 13f, C.TEXT2)
+        val tx = insetLeft + g.dp(60f)
+        g.drawText(c, p.title, tx, cy - (g.lineH(tp) + g.lineH(sp)) / 2, tp, x1 - tx)
+        g.drawText(c, p.sub, tx, cy - (g.lineH(tp) + g.lineH(sp)) / 2 + g.lineH(tp), sp, x1 - tx)
+        val vTop = top + headerH + g.dp(6f)
+        val noteP = g.text(g.fonts.reg, 11.5f, C.TEXT3)
+        val vBot = h - insetBottom - g.dp(30f)
+        g.drawTextCenter(c, if (p.lyrics) "Источник: LRCLIB · текст сохранится только в приложении" else "Источники: MusicBrainz, Deezer · обложка сохранится в приложении",
+            w / 2, h - insetBottom - g.dp(22f), noteP, x1 - x0)
+        var anim = false
+        when (p.state) {
+            0 -> {
+                val r = g.dp(14f); val ccy = (vTop + vBot) / 2 - g.dp(20f)
+                for (i in 0 until 8) {
+                    val a = t * 6 + i * PI.toFloat() / 4
+                    g.circle(c, w / 2 + kotlin.math.cos(a) * r, ccy + kotlin.math.sin(a) * r, g.dp(2.6f), C.withAlpha(C.ACCENT, 60 + i * 24))
+                }
+                g.drawTextCenter(c, "Ищу…", w / 2, ccy + g.dp(30f), g.text(g.fonts.semi, 15f, C.TEXT2))
+                anim = true
+            }
+            2, 3 -> {
+                val ccy = (vTop + vBot) / 2 - g.dp(40f)
+                g.drawTextCenter(c, if (p.state == 2) "Ничего не нашлось" else "Нет связи с интернетом", w / 2, ccy, g.text(g.fonts.bold, 18f, C.TEXT), x1 - x0)
+                val msg = if (p.state == 2) "Проверьте название и исполнителя в тегах" else "Проверьте Wi-Fi и попробуйте ещё раз"
+                g.drawTextCenter(c, msg, w / 2, ccy + g.dp(30f), g.text(g.fonts.reg, 14f, C.TEXT2), x1 - x0)
+                val bw = g.dp(180f); val bh = g.dp(44f); val by = ccy + g.dp(70f)
+                g.rrect(c, w / 2 - bw / 2, by, bw, bh, bh / 2, if (pressedKey == "pickretry") C.SEL else C.CHIP)
+                val bp = g.text(g.fonts.semi, 15f, C.TEXT)
+                g.drawTextCenter(c, "Повторить", w / 2, by + (bh - g.lineH(bp)) / 2, bp)
+                hit(w / 2 - bw / 2, by, w / 2 + bw / 2, by + bh, "pickretry") {
+                    if (p.lyrics) p.track?.let { openLyricsPicker(it) } else openCoverPicker(p.ai)
+                }
+            }
+            else -> {
+                c.save()
+                c.clipRect(0f, vTop, w, vBot)
+                val contentH = if (p.lyrics) drawLyricHits(c, p, x0, x1, vTop - p.scroll) else drawCoverHits(c, p, x0, x1, vTop - p.scroll)
+                c.restore()
+                p.maxScroll = max(0f, contentH - (vBot - vTop))
+                p.scroll = p.scroll.coerceIn(0f, p.maxScroll)
+                g.vgrad(c, 0f, vTop, w, g.dp(14f), 0f, C.BG, C.withAlpha(C.BG, 0))
+                if (p.saving >= 0) anim = true
+            }
+        }
+        return anim
+    }
+
+    /** grid of found covers; returns the content height */
+    private fun drawCoverHits(c: Canvas, p: Picker, x0: Float, x1: Float, y0: Float): Float {
+        val land = width > height * 1.15f
+        val cols = if (land) 4 else 2
+        val gap = g.dp(14f)
+        val cw = (x1 - x0 - gap * (cols - 1)) / cols
+        val tp = g.text(g.fonts.semi, 13.5f, C.TEXT)
+        val sp = g.text(g.fonts.reg, 12f, C.TEXT2)
+        val rowH = cw + g.dp(8f) + g.lineH(tp) + g.lineH(sp) + g.dp(16f)
+        for ((i, hit0) in p.covers.withIndex()) {
+            val x = x0 + (i % cols) * (cw + gap)
+            val y = y0 + (i / cols) * rowH
+            if (y > height || y + rowH < 0) continue
+            val tb = hit0.thumb
+            if (tb != null) g.bitmapRounded(c, tb, x, y, cw, g.dp(8f), if (p.saving >= 0 && p.saving != i) 110 else 255)
+            else {
+                g.rrect(c, x, y, cw, cw, g.dp(8f), C.hex(0x18181C))
+                g.drawTextCenter(c, "…", x + cw / 2, y + cw / 2 - g.dp(10f), g.text(g.fonts.semi, 16f, C.TEXT3))
+            }
+            if (pressedKey == "pc$i") g.rrect(c, x, y, cw, cw, g.dp(8f), C.argb(60, 0xFFFFFF))
+            // source badge
+            val bp = g.text(g.fonts.semi, 10.5f, C.TEXT)
+            val bw = bp.measureText(hit0.source) + g.dp(12f)
+            g.rrect(c, x + g.dp(6f), y + g.dp(6f), bw, g.dp(20f), g.dp(10f), C.argb(170, 0x000000))
+            g.drawText(c, hit0.source, x + g.dp(12f), y + g.dp(6f) + (g.dp(20f) - g.lineH(bp)) / 2, bp)
+            if (p.saving == i) {
+                g.rrect(c, x, y, cw, cw, g.dp(8f), C.argb(150, 0x000000))
+                g.drawTextCenter(c, "Сохраняю…", x + cw / 2, y + cw / 2 - g.dp(9f), g.text(g.fonts.semi, 14f, C.TEXT))
+            }
+            g.drawText(c, hit0.title, x, y + cw + g.dp(8f), tp, cw)
+            g.drawText(c, listOf(hit0.artist, hit0.year).filter { it.isNotBlank() }.joinToString(" · "), x, y + cw + g.dp(8f) + g.lineH(tp), sp, cw)
+            if (p.saving < 0) p.taps.add(floatArrayOf(x, max(y, insetTop + headerH), x + cw, y + cw) to {
+                p.saving = i
+                com.kasseta.player.Online.fetchFull(hit0) { bytes ->
+                    val al = lib.albums.getOrNull(p.ai)
+                    if (bytes != null && al != null && com.kasseta.player.Covers.setUserCover(al, bytes)) {
+                        toast("Обложка сохранена")
+                        if (picker === p) picker = null
+                    } else {
+                        toast("Не удалось скачать обложку")
+                        p.saving = -1
+                    }
+                    invalidate()
+                }
+                invalidate()
+            })
+        }
+        pickerScroll(p)
+        return ((p.covers.size + cols - 1) / cols) * rowH
+    }
+
+    private val lrcTime = Regex("""\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?]""")
+
+    /** list of found lyrics; returns the content height */
+    private fun drawLyricHits(c: Canvas, p: Picker, x0: Float, x1: Float, y0: Float): Float {
+        var y = y0
+        val tp = g.text(g.fonts.bold, 15f, C.TEXT)
+        val sp = g.text(g.fonts.reg, 12.5f, C.TEXT2)
+        val pp = g.text(g.fonts.reg, 13f, C.TEXT3)
+        for ((i, hl) in p.texts.withIndex()) {
+            val preview = hl.text.lineSequence().map { it.replace(lrcTime, "").trim() }.filter { it.isNotEmpty() }.take(2).toList()
+            val rh = g.dp(14f) + g.lineH(tp) + g.lineH(sp) + g.dp(6f) + preview.size * g.lineH(pp) + g.dp(14f)
+            if (y + rh > 0 && y < height) {
+                if (pressedKey == "pl$i" || p.saving == i) g.rrect(c, x0 - g.dp(8f), y, x1 - x0 + g.dp(16f), rh, g.dp(12f), C.SEL)
+                var yy = y + g.dp(14f)
+                // badge: timed lyrics follow the song
+                val bp = g.text(g.fonts.semi, 11f, if (hl.isSynced) C.TEXT else C.TEXT2)
+                val bl = if (hl.isSynced) "с таймингом" else "только текст"
+                val bw = bp.measureText(bl) + g.dp(14f)
+                g.rrect(c, x1 - bw, yy, bw, g.dp(22f), g.dp(11f), if (hl.isSynced) C.ACCENT else C.CHIP)
+                g.drawText(c, bl, x1 - bw + g.dp(7f), yy + (g.dp(22f) - g.lineH(bp)) / 2, bp)
+                g.drawText(c, hl.title + "  —  " + hl.artist, x0, yy, tp, x1 - x0 - bw - g.dp(10f)); yy += g.lineH(tp)
+                val dur = if (hl.durSec > 0) fmtTime(hl.durSec * 1000L) else ""
+                g.drawText(c, listOf(hl.album, dur).filter { it.isNotBlank() }.joinToString(" · "), x0, yy, sp, x1 - x0); yy += g.lineH(sp) + g.dp(6f)
+                for (l in preview) { g.drawText(c, l, x0, yy, pp, x1 - x0); yy += g.lineH(pp) }
+                g.line(c, x0, y + rh, x1, y + rh, 1f, C.LINE)
+                if (p.saving < 0) p.taps.add(floatArrayOf(x0, max(y, insetTop + headerH), x1, y + rh) to tap@{
+                    val t = p.track ?: return@tap
+                    p.saving = i
+                    try {
+                        com.kasseta.player.Lyrics.saveUser(t, hl.text)
+                        com.kasseta.player.Lyrics.load(t) { invalidate() }
+                        toast("Текст сохранён")
+                        if (engine.currentTrack()?.id == t.id) { showLyrics = true; lyrKey = "" }
+                    } catch (_: Exception) {
+                        toast("Не удалось сохранить текст")
+                    }
+                    picker = null
+                    invalidate()
+                })
+            }
+            y += rh
+        }
+        pickerScroll(p)
+        return y - y0
+    }
+
+    private fun pickerScroll(p: Picker) {
+        dragHit(0f, insetTop + headerH, width.toFloat(), height.toFloat(), "pickscroll") { px, py, phase ->
+            pickTapX = px
+            when (phase) {
+                0 -> { p.dragY = py; p.dragStart = py; p.moved = false }
+                1 -> { if (abs(py - p.dragStart) > slop) p.moved = true; if (p.moved) p.scroll = (p.scroll - (py - p.dragY)).coerceIn(0f, p.maxScroll); p.dragY = py }
+                2 -> if (!p.moved) {
+                    val x = pickTapX
+                    p.taps.lastOrNull { (r, _) -> x >= r[0] && x <= r[2] && py >= r[1] && py <= r[3] }?.second?.invoke()
+                }
+            }
+            invalidate()
+        }
+    }
+
     // ---------- toast ----------
 
     private fun drawToast(c: Canvas, now: Long): Boolean {
@@ -2371,6 +2598,11 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         if (ai >= 0) items.add(SheetItem("Открыть альбом") { push(Scr(Kind.ALBUM, lib.albums[ai].key)) })
         val artist = if (ai >= 0) lib.albums[ai].artist else tr.artist
         if (lib.artistIndex(artist) >= 0) items.add(SheetItem("Открыть исполнителя") { push(Scr(Kind.ARTIST, artist)) })
+        items.add(SheetItem("Найти текст в интернете") { openLyricsPicker(tr) })
+        if (com.kasseta.player.Lyrics.hasUser(tr)) items.add(SheetItem("Убрать скачанный текст") {
+            com.kasseta.player.Lyrics.removeUser(tr); toast("Скачанный текст убран")
+        })
+        if (ai >= 0) items.add(SheetItem("Найти обложку альбома") { openCoverPicker(ai) })
         val info = listOf(tr.formatName, tr.qualityLine.removePrefix(tr.formatName + " · "), fmtTime(tr.durMs)).joinToString(" · ")
         openSheet(Sheet(tr.title, "${tr.artist} · $info", items, closeOnTap = true))
     }
@@ -2384,6 +2616,10 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         items.add(SheetItem("Играть следующим") { engine.enqueue(tracks, true); toast("Альбом будет следующим") })
         items.add(SheetItem("В конец очереди") { engine.enqueue(tracks, false); toast("Альбом добавлен в очередь") })
         if (lib.artistIndex(al.artist) >= 0) items.add(SheetItem("Открыть исполнителя") { push(Scr(Kind.ARTIST, al.artist)) })
+        items.add(SheetItem("Найти обложку в интернете") { openCoverPicker(ai) })
+        if (com.kasseta.player.Covers.hasUserCover(al)) items.add(SheetItem("Вернуть свою обложку") {
+            com.kasseta.player.Covers.removeUserCover(al); toast("Обложка из интернета убрана")
+        })
         openSheet(Sheet(al.name, al.artist, items, closeOnTap = true))
     }
 

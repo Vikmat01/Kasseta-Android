@@ -27,8 +27,38 @@ object Covers {
     private val pool = ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS, LinkedBlockingDeque())
     var onLoaded: (() -> Unit)? = null
 
+    private lateinit var userDir: File
+
     fun init(cacheDir: File) {
         diskDir = File(cacheDir, "covers").apply { mkdirs() }
+        userDir = File(cacheDir.parentFile, "user_covers").apply { mkdirs() }
+    }
+
+    /** cover the user downloaded for this album (kept in the app, works for SD cards too) */
+    private fun userFile(album: Album) = File(userDir, md5(album.key) + ".jpg")
+    fun hasUserCover(album: Album) = userFile(album).exists()
+
+    /** saves a downloaded picture as the album's cover; false if it is not an image */
+    fun setUserCover(album: Album, bytes: ByteArray): Boolean {
+        val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, probe)
+        if (probe.outWidth <= 0) return false
+        userFile(album).writeBytes(bytes)
+        forget(album)
+        return true
+    }
+
+    fun removeUserCover(album: Album) { userFile(album).delete(); forget(album) }
+
+    /** drops every cached size of this album's cover so it is read again */
+    private fun forget(album: Album) {
+        for (b in listOf(96, 192, 384, 640, 1024)) {
+            val k = album.key + "@" + b
+            mem.remove(k)
+            File(diskDir, md5(k) + ".jpg").delete()
+        }
+        synchronized(missing) { missing.remove(album.key) }
+        main.post { onLoaded?.invoke() }
     }
 
     fun bucket(px: Int): Int = when {
@@ -130,6 +160,7 @@ object Covers {
     }
 
     private fun decodeSource(album: Album, tracks: List<Track>, size: Int): Bitmap? {
+        userFile(album).takeIf { it.exists() }?.let { f -> decodeFile(f, size)?.let { return it } }
         val dirs = (tracks.map { it.dir } + album.dir).distinct()
         val folder = folderImage(dirs)
         val named = folder != null && goodNames.any { folder.nameWithoutExtension.lowercase(Locale.ROOT).contains(it) }

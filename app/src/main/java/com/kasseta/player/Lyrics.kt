@@ -44,7 +44,24 @@ class Lyrics(val lines: List<Line>, val synced: Boolean, val source: String) {
             }, "kasseta-lyrics").start()
         }
 
+        private val userDir by lazy { File(App.ctx.filesDir, "user_lyrics").apply { mkdirs() } }
+        private fun userFile(t: Track) = File(userDir, md5(t.id) + ".lrc")
+        private fun md5(s: String) = java.security.MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+        fun hasUser(t: Track) = userFile(t).exists()
+
+        /** saves lyrics found on the internet for this track */
+        fun saveUser(t: Track, text: String) {
+            userFile(t).writeText(text)
+            synchronized(cache) { cache.remove(t.id) }
+        }
+
+        fun removeUser(t: Track) {
+            userFile(t).delete()
+            synchronized(cache) { cache.remove(t.id) }
+        }
+
         fun find(t: Track): Lyrics? {
+            userFile(t).takeIf { it.isFile }?.let { f -> parse(f.readText(), "из интернета")?.let { return it } }
             for (f in lrcCandidates(t)) {
                 if (f.isFile && f.length() in 1..512 * 1024) {
                     val text = TextFix.decode(f.readBytes())
