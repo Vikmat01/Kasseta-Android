@@ -153,6 +153,11 @@ object App {
         return i
     }
 
+    /** visualizer under the cassette: 0 off, 1 VU needles, 2 spectrum, 3 oscilloscope */
+    var vizMode: Int
+        get() = prefs.getInt("viz", 1)
+        set(v) { prefs.edit().putInt("viz", v).apply() }
+
     var cdView: Boolean
         get() = prefs.getBoolean("cdView", false)
         set(v) { prefs.edit().putBoolean("cdView", v).apply() }

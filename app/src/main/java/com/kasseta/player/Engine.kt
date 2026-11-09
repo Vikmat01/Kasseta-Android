@@ -516,8 +516,34 @@ class Engine(private val ctx: Context) {
         return true
     }
 
+    // ---------- what is being heard, for the visualizer ----------
+    private val vizMask = (1 shl 15) - 1
+    private val vizL = FloatArray(vizMask + 1)
+    private val vizR = FloatArray(vizMask + 1)
+    @Volatile private var vizRate = 44100
+
+    /**
+     * Copies the last [n] stereo frames that are coming out of the speaker right now.
+     * Returns the sample rate, or 0 when nothing is playing.
+     */
+    fun vizSnapshot(l: FloatArray, r: FloatArray, n: Int): Int {
+        if (!playing) return 0
+        val end = synchronized(lock) { if (at == null) -1L else min(playedFrames(), written) }
+        if (end < n) return 0
+        var i = end - n
+        for (k in 0 until n) { val j = (i and vizMask.toLong()).toInt(); l[k] = vizL[j]; r[k] = vizR[j]; i++ }
+        return vizRate
+    }
+
     private fun queueSamples(frames: Int) {
         val total = frames * 2
+        // keep a copy for the visualizer, indexed by the frame number in the AudioTrack
+        val base = synchronized(lock) { written }
+        for (k in 0 until frames) {
+            val j = ((base + k) and vizMask.toLong()).toInt()
+            vizL[j] = fbuf[2 * k]; vizR[j] = fbuf[2 * k + 1]
+        }
+        vizRate = atRate
         if (at16) {
             for (i in 0 until total) {
                 val v = fbuf[i] * 32767f + (dither.nextFloat() - dither.nextFloat()) // TPDF dither

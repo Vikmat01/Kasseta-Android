@@ -1727,8 +1727,13 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
 
     // ---------- player ----------
 
+    private val viz by lazy { Viz(g) }
+
+    private fun vizName(m: Int) = when (m) { Viz.VU -> "стрелки"; Viz.SPECTRUM -> "спектр"; Viz.SCOPE -> "осциллограф"; else -> "выкл" }
+
     /** player: show the lyrics instead of the cassette / CD */
     private var showLyrics = false
+    private val vizH get() = if (width > height * 1.15f) g.dp(42f) else g.dp(52f)
     private var lyrScroll = -1f
     private var lyrKey = ""
     private var lyrManualUntil = 0L
@@ -1756,7 +1761,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         } else {
             vx = insetLeft + g.dp(6f); vw = w - insetLeft - insetRight - g.dp(12f)
             vy = y0 + headerH + g.dp(2f)
-            vh = max(g.dp(150f), bottom - vy - g.dp(262f))
+            vh = max(g.dp(150f), bottom - vy - g.dp(262f) - (if (App.vizMode != Viz.OFF) vizH + g.dp(18f) else 0f))
             ix0 = padL; ix1 = padR
         }
         // header
@@ -1842,10 +1847,25 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
             hit(vx, usedTop, vx + vw, usedBot, "visual") { App.cdView = !App.cdView; invalidate() }
         }
         // info block: right under the picture in portrait, centred on the right in landscape
-        val infoH = g.dp(250f)
-        var iy = if (landscape) max(y0 + headerH + g.dp(6f), y0 + headerH + (bottom - y0 - headerH - infoH) / 2)
+        val vizOn = App.vizMode != Viz.OFF
+        val stripH = if (!vizOn) 0f else if (landscape) vizH + g.dp(12f) else vizH + g.dp(18f)
+        val infoH = g.dp(250f) + stripH
+        var iy = if (landscape) max(y0 + headerH, y0 + headerH + (bottom - y0 - headerH - infoH) / 2)
         else if (lyrOn) vy + vh + g.dp(16f)
-        else usedBot + min(g.dp(34f), max(g.dp(16f), (bottom - usedBot - infoH) * 0.4f))
+        else usedBot + min(g.dp(30f), max(g.dp(14f), (bottom - usedBot - infoH) * 0.4f))
+        // visualizer strip; a tap switches the style, the menu turns it off
+        if (vizOn) {
+            val sx0 = if (landscape) ix0 else insetLeft + g.dp(18f)
+            val sx1 = if (landscape) ix1 else w - insetRight - g.dp(18f)
+            val moving = viz.draw(c, engine, App.vizMode, sx0, iy, sx1 - sx0, vizH)
+            if (moving) postInvalidateOnAnimation()
+            hit(sx0, iy - g.dp(6f), sx1, iy + vizH + g.dp(6f), "viz") {
+                App.vizMode = App.vizMode % 3 + 1
+                toast("Визуализатор: " + vizName(App.vizMode))
+                invalidate()
+            }
+            iy += stripH
+        }
 
         // titles
         val icx = (ix0 + ix1) / 2
@@ -1872,9 +1892,12 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         g.drawText(c, fmt, bx + g.dp(7f), iy + (bh - g.lineH(qp)) / 2, qp)
         g.drawText(c, qual, bx + bw + g.dp(8f), iy + (bh - g.lineH(qr)) / 2, qr)
         iy += bh + g.dp(6f)
-        val out = engine.outputLine
-        if (out.isNotEmpty()) g.drawTextCenter(c, out, icx, iy, g.text(g.fonts.reg, 11.5f, C.TEXT3), iw)
-        iy += g.dp(26f)
+        // landscape with the visualizer: no room for the output line
+        if (!(landscape && vizOn)) {
+            val out = engine.outputLine
+            if (out.isNotEmpty()) g.drawTextCenter(c, out, icx, iy, g.text(g.fonts.reg, 11.5f, C.TEXT3), iw)
+            iy += g.dp(26f)
+        } else iy += g.dp(8f)
 
         // progress
         val dur = tr.durMs
@@ -2188,6 +2211,9 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         items.add(SheetItem("Вид плеера", { if (App.cdView) "CD" else "кассета" }) { App.cdView = !App.cdView })
         items.add(SheetItem("Ориентация экрана", { if (App.landscape) "горизонтальная" else "вертикальная" }) {
             App.landscape = !App.landscape; host.applyOrientation()
+        })
+        items.add(SheetItem("Визуализатор", { vizName(App.vizMode) }) {
+            App.vizMode = (App.vizMode + 1) % 4; invalidate()
         })
         items.add(SheetItem("Звуки кассет и коробок", { onOff(App.sounds) }) { App.sounds = !App.sounds })
         items.add(SheetItem("Плеер на экране блокировки", {

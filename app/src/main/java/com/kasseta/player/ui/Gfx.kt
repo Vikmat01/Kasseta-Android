@@ -40,6 +40,10 @@ object C {
     fun hex(rgb: Int) = 0xFF000000.toInt() or rgb
     fun argb(a: Int, rgb: Int) = (a shl 24) or (rgb and 0xFFFFFF)
     fun withAlpha(c: Int, a: Int) = (a.coerceIn(0, 255) shl 24) or (c and 0xFFFFFF)
+    fun lerpColor(a: Int, b: Int, t: Float): Int {
+        fun ch(sh: Int) = (((a shr sh) and 0xFF) + (((b shr sh) and 0xFF) - ((a shr sh) and 0xFF)) * t).toInt().coerceIn(0, 255)
+        return (ch(24) shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+    }
 
     fun hsv(h: Float, s: Float, v: Float): Int = Color.HSVToColor(floatArrayOf(h, s, v))
 }
