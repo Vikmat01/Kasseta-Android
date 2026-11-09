@@ -175,6 +175,8 @@ class Gfx(ctx: Context) {
     }
 
     fun vgrad(c: Canvas, x: Float, y: Float, w: Float, h: Float, r: Float, c0: Int, c1: Int) {
+        // the paint's own alpha scales a shader on Android: make it opaque so the gradient's colours count
+        fill.color = 0xFF000000.toInt()
         fill.shader = LinearGradient(0f, y, 0f, y + h, c0, c1, Shader.TileMode.CLAMP)
         rect.set(x, y, x + w, y + h)
         c.drawRoundRect(rect, r, r, fill)
