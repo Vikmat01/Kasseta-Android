@@ -813,10 +813,9 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         ensureFilter()
         val albums = if (App.qualityFilter == 0) albums0 else albums0.filter { fAlbumOk.getOrElse(it) { true } }.toIntArray()
         if (App.albumTheme == 3) {
-            val bh = if (key == "lib") aodBanner(c, vTop + g.dp(10f), vTop, vBot) else 0f
-            val qh = qualityChips(c, vTop + g.dp(10f) + bh, vTop, vBot)
-            val ch = themeChips(c, vTop + g.dp(10f) + bh + qh, vTop, vBot)
-            drawCoverFlow(c, albums, key + "#" + App.qualityFilter, vTop + g.dp(10f) + bh + qh + ch, vBot)
+            // one compact row instead of the banner and two rows of chips: the stage gets the room
+            val rh = coverFlowBar(c, vTop + g.dp(8f), key == "lib")
+            drawCoverFlow(c, albums, key + "#" + App.qualityFilter, vTop + g.dp(8f) + rh, vBot)
             return vBot - vTop
         }
         val bh = if (key == "lib") aodBanner(c, vTop + g.dp(10f) - scroll, vTop, vBot) else 0f
@@ -1167,33 +1166,107 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         return b
     }
 
-    private fun drawCoverFlow(c: Canvas, albums: IntArray, key: String, top: Float, bottom: Float) {
-        val n = albums.size
-        if (n == 0) return
-        val st = cfState.getOrPut(key) {
-            val cur = currentAlbumIdx()
-            val i = albums.indexOf(cur).coerceAtLeast(0).toFloat()
-            floatArrayOf(i, i)
-        }
-        st[0] = st[0].coerceIn(0f, (n - 1).toFloat()); st[1] = st[1].coerceIn(0f, (n - 1).toFloat())
-        val pos = st[0]
-        val w = width.toFloat()
-        val s = min(w * 0.56f, (bottom - top) * 0.40f)
-        val cx = w / 2
-        val cy = top + max(s * 0.62f, (bottom - top - s * 2.05f) / 2 + s * 0.5f)
-        val f = s * 3.2f
-        val px = Covers_bucket(s)
-        val first = max(0, kotlin.math.floor(pos).toInt() - 6)
-        val last = min(n - 1, kotlin.math.ceil(pos).toInt() + 6)
-        val order = (first..last).sortedByDescending { abs(it - pos) }
+    /** random order of the albums for each list; a new one on each start or with the shuffle button */
+    private val cfOrder = HashMap<String, IntArray>()
 
-        fun quad(i: Int, reflect: Boolean): FloatArray {
-            val d = i - pos
+    private fun chip(c: Canvas, x: Float, y: Float, h: Float, label: String, key: String, on: Boolean, arrow: Boolean, tap: () -> Unit): Float {
+        val p = g.text(g.fonts.semi, 13f, if (on) C.TEXT else C.TEXT2)
+        val w = p.measureText(label) + g.dp(if (arrow) 40f else 26f)
+        g.rrect(c, x, y, w, h, h / 2, if (on) C.ACCENT else if (pressedKey == key) C.SEL else C.CHIP)
+        g.drawText(c, label, x + g.dp(13f), y + (h - g.lineH(p)) / 2, p)
+        if (arrow) {
+            val ax = x + w - g.dp(18f); val ay = y + h / 2; val k = g.dp(4f)
+            g.line(c, ax - k, ay - k / 2, ax, ay + k / 2, g.dp(1.6f), p.color)
+            g.line(c, ax, ay + k / 2, ax + k, ay - k / 2, g.dp(1.6f), p.color)
+        }
+        hit(x, y, x + w, y + h, key, tap = tap)
+        return w
+    }
+
+    /** Cover Flow header: theme, quality, album of the day and shuffle in one row; returns its height */
+    private fun coverFlowBar(c: Canvas, y: Float, withAod: Boolean): Float {
+        val h = g.dp(34f)
+        var x = padL
+        x += chip(c, x, y, h, themeNames[3], "cfTheme", true, true) {
+            openSheet(Sheet("Вид альбомов", "", themeNames.mapIndexed { i, n ->
+                SheetItem(n, { if (App.albumTheme == i) "✓" else "" }) { App.albumTheme = i; tabScroll.fill(0f); closeSheet() }
+            }, closeOnTap = false))
+        } + g.dp(8f)
+        ensureFilter()
+        val q = App.qualityFilter
+        chip(c, x, y, h, if (q == 0) "Качество" else qualityNames[q], "cfQual", q != 0, true) {
+            openSheet(Sheet("Качество", "", (0..4).filter { it == 0 || tierCount[it] > 0 }.map { i ->
+                SheetItem(qualityNames[i], { if (App.qualityFilter == i) "✓" else "" }) { App.qualityFilter = i; cfState.clear(); closeSheet() }
+            }, closeOnTap = false))
+        }
+        // right side: shuffle and the album of the day
+        var rx = padR - g.dp(20f)
+        val cy = y + h / 2
+        if (pressedKey == "cfShuffle") g.circle(c, rx, cy, g.dp(20f), C.SEL)
+        g.iconShuffle(c, rx, cy, g.dp(20f), C.TEXT2)
+        hit(rx - g.dp(22f), y, rx + g.dp(22f), y + h, "cfShuffle") {
+            cfOrder.clear(); cfState.clear(); cfShuffleAt = SystemClock.uptimeMillis(); invalidate()
+        }
+        if (withAod && lib.albums.isNotEmpty()) {
+            rx -= g.dp(46f)
+            if (pressedKey == "aod") g.circle(c, rx, cy, g.dp(20f), C.SEL)
+            iconDayBox(c, rx, cy + g.dp(1f), g.dp(22f), C.TEXT2)
+            if (App.aodSeen != App.today()) g.circle(c, rx + g.dp(9f), cy - g.dp(9f), g.dp(4f), C.ACCENT)
+            hit(rx - g.dp(22f), y, rx + g.dp(22f), y + h, "aod") { openAod() }
+        }
+        return h + g.dp(6f)
+    }
+
+    private var cfShuffleAt = 0L
+
+    private fun drawCoverFlow(c: Canvas, albums0: IntArray, key: String, top: Float, bottom: Float) {
+        if (albums0.isEmpty()) return
+        // random order, kept until the list changes or the shuffle button is pressed
+        val albums = cfOrder[key]?.takeIf { o -> o.size == albums0.size && o.toHashSet() == albums0.toHashSet() }
+            ?: albums0.copyOf().also { it.shuffle(); cfOrder[key] = it }
+        val n = albums.size
+        val loop = n >= 5
+        val st = cfState.getOrPut(key) { floatArrayOf(0f, 0f) }
+        if (!loop) { st[0] = st[0].coerceIn(0f, (n - 1).toFloat()); st[1] = st[1].coerceIn(0f, (n - 1).toFloat()) }
+        val pos = st[0]
+        fun wrap(i: Int) = ((i % n) + n) % n
+        /** signed distance of slot i from the centre, the short way round in a loop */
+        fun dist(i: Int): Float {
+            var d = i - pos
+            if (loop) { d = ((d % n) + n) % n; if (d > n / 2f) d -= n }
+            return d
+        }
+        val w = width.toFloat()
+        val land = width > height * 1.15f
+        val stageH = bottom - top
+        val capH = g.dp(if (land) 54f else 124f)
+        val s = if (land) min(w * 0.34f, (stageH - capH - g.dp(10f)) / 1.1f)
+        else min(w * 0.68f, (stageH - capH - g.dp(30f)) / 1.3f)
+        val cx = w / 2
+        val cy = top + g.dp(if (land) 4f else 18f) + s / 2 + max(0f, (stageH - capH - s * (if (land) 1.1f else 1.3f)) * (if (land) 0.35f else 0.5f))
+        val f = s * 2.8f
+        val px = Covers_bucket(s)
+        // spotlight behind the centre cover
+        for (k in 0 until 16) g.circle(c, cx, cy - s * 0.05f, s * (1.1f - k * 0.055f), C.argb(3, 0xE5245E))
+        // the slots that are on screen, far ones first
+        val vis = ArrayList<Pair<Int, Float>>()
+        val range = min(n - 1, 7)
+        val c0 = kotlin.math.round(pos).toInt()
+        val seen = HashSet<Int>()
+        for (k in -range..range) {
+            val i = if (loop) wrap(c0 + k) else c0 + k
+            if (i < 0 || i >= n || !seen.add(i)) continue
+            val d = dist(i)
+            if (abs(d) <= 7.5f) vis.add(i to d)
+        }
+        vis.sortByDescending { abs(it.second) }
+
+        fun quad(d: Float, reflect: Boolean): FloatArray {
             val a = min(abs(d), 1f)
             val sg = if (d < 0) -1f else 1f
-            val th = sg * a * 62f * PI.toFloat() / 180f
-            val xoff = sg * (a * s * 0.80f + max(0f, abs(d) - 1f) * s * 0.20f)
-            val zoff = a * s * 0.55f
+            val th = sg * a * 64f * PI.toFloat() / 180f
+            val xoff = sg * (a * s * 0.64f + max(0f, abs(d) - 1f) * s * 0.2f)
+            val zoff = a * s * 0.42f
             val ct = kotlin.math.cos(th); val stt = kotlin.math.sin(th)
             val ys = if (reflect) floatArrayOf(s * 1.5f, s * 1.5f, s * 0.5f, s * 0.5f) else floatArrayOf(-s * 0.5f, -s * 0.5f, s * 0.5f, s * 0.5f)
             val xs = floatArrayOf(-s * 0.5f, s * 0.5f, s * 0.5f, -s * 0.5f)
@@ -1215,48 +1288,84 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
             c.drawBitmap(b, cfMatrix, cfPaint)
         }
 
-        // reflections
-        for (i in order) drawQuad(coverBitmap(albums[i], px), quad(i, true), 120)
-        val reflTop = cy + s * 0.5f * (f / (f + s * 0.55f))
-        g.fill.shader = android.graphics.LinearGradient(0f, reflTop, 0f, cy + s * 1.1f, C.argb(150, 0x000000), C.BG, android.graphics.Shader.TileMode.CLAMP)
-        c.drawRect(0f, reflTop, w, cy + s * 1.6f, g.fill)
-        g.fill.shader = null
-        // covers, the far ones darker
-        for (i in order) {
-            val q = quad(i, false)
-            drawQuad(coverBitmap(albums[i], px), q, 255)
-            val a = min(abs(i - pos), 1f)
-            if (a > 0.02f) g.poly(c, C.argb((a * 110).toInt(), 0x000000), q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7])
-            else g.poly(c, C.argb(18, 0xFFFFFF), q[0], q[1], q[0] + (q[2] - q[0]) * 0.55f, q[1], q[0], q[1] + (q[7] - q[1]) * 0.55f)
+        // shuffle: the covers drop in for a moment
+        val sh = ((SystemClock.uptimeMillis() - cfShuffleAt) / 450f).coerceIn(0f, 1f)
+        val fadeIn = if (cfShuffleAt == 0L) 255 else (255 * (1f - (1f - sh) * (1f - sh))).toInt()
+        if (sh < 1f) postInvalidateOnAnimation()
+        // reflections on a glossy floor
+        for ((i, d) in vis) drawQuad(coverBitmap(albums[i], px), quad(d, true), fadeIn * 85 / 255)
+        val floor = cy + s * 0.5f
+        val fl = s * (if (land) 0.3f else 0.62f)
+        g.vgrad(c, 0f, floor, w, fl, 0f, C.argb(120, 0x000000), C.BG)
+        g.fill.color = C.BG
+        c.drawRect(0f, floor + fl - 1f, w, floor + s * 1.2f, g.fill)
+        // covers, the far ones darker; a shadow and a glint on the front one
+        for ((i, d) in vis) {
+            val q = quad(d, false)
+            val a = min(abs(d), 1f)
+            if (a < 0.5f) g.poly(c, C.argb(90, 0x000000), q[6] - s * 0.02f, q[7], q[4] + s * 0.02f, q[5], q[4] - s * 0.04f, q[5] + s * 0.035f, q[6] + s * 0.04f, q[7] + s * 0.035f)
+            drawQuad(coverBitmap(albums[i], px), q, fadeIn)
+            val dark = (a * 0.18f + max(0f, min(abs(d), 6f) - 1f) / 5f * 0.5f).coerceIn(0f, 0.7f)
+            if (dark > 0.02f) g.poly(c, C.argb((dark * 255).toInt(), 0x000000), q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7])
+            else g.poly(c, C.argb(16, 0xFFFFFF), q[0], q[1], q[0] + (q[2] - q[0]) * 0.6f, q[1], q[0], q[1] + (q[7] - q[1]) * 0.6f)
         }
-        // caption
-        val ci = kotlin.math.round(pos).toInt().coerceIn(0, n - 1)
-        val al = lib.albums[albums[ci]]
-        var ty = cy + s * 1.08f
-        val tp = g.text(g.fonts.bold, 19f, if (albums[ci] == currentAlbumIdx()) C.ACCENT else C.TEXT)
-        g.drawTextCenter(c, al.name, cx, ty, tp, w - g.dp(48f)); ty += g.lineH(tp)
+        // caption of the centre album
+        val ci = if (loop) wrap(c0) else c0.coerceIn(0, n - 1)
+        val ai = albums[ci]
+        val al = lib.albums[ai]
+        var ty = floor + g.dp(if (land) 6f else 22f)
+        val tw = if (land) w * 0.5f else w - g.dp(48f)
+        if (land) {
+            // one line of text, the play button on the right
+            val lp = g.text(g.fonts.bold, 17f, if (ai == currentAlbumIdx()) C.ACCENT else C.TEXT)
+            val ap2 = g.text(g.fonts.semi, 14f, C.ACCENT2)
+            val nameW = min(lp.measureText(al.name), tw * 0.6f)
+            val artW = min(ap2.measureText("  ·  " + al.artist), tw - nameW)
+            val lx = cx - (nameW + artW) / 2
+            g.drawText(c, al.name, lx, ty, lp, nameW)
+            g.drawText(c, "  ·  " + al.artist, lx + nameW, ty + (g.lineH(lp) - g.lineH(ap2)) / 2, ap2, artW)
+            val t0l = al.tracks.firstOrNull()?.let { lib.tracks[it] }
+            val metaL = listOf(if (al.year > 0) al.year.toString() else "", plural(al.tracks.size, "трек", "трека", "треков"), t0l?.qualityLine ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+            g.drawTextCenter(c, metaL, cx, ty + g.lineH(lp), g.text(g.fonts.reg, 12f, C.TEXT2), tw)
+            val bh = g.dp(38f); val pp = g.text(g.fonts.bold, 14f, C.TEXT)
+            val bw = pp.measureText("Слушать") + g.dp(52f)
+            val bx = padR - bw; val by = ty + (g.lineH(lp) + g.dp(16f) - bh) / 2
+            g.rrect(c, bx, by, bw, bh, bh / 2, if (pressedKey == "cfPlay") C.ACCENT2 else C.ACCENT)
+            g.iconPlay(c, bx + g.dp(22f), by + bh / 2, g.dp(15f), false, C.TEXT)
+            g.drawText(c, "Слушать", bx + g.dp(36f), by + (bh - g.lineH(pp)) / 2, pp)
+            hit(bx, by, bx + bw, by + bh, "cfPlay") { playList(al.tracks.map { lib.tracks[it] }, 0); openPlayer() }
+            val cp = g.text(g.fonts.reg, 12f, C.TEXT3)
+            g.drawText(c, "${ci + 1} / $n", padL, by + (bh - g.lineH(cp)) / 2, cp)
+        } else {
+        val tp = g.text(g.fonts.bold, 20f, if (ai == currentAlbumIdx()) C.ACCENT else C.TEXT)
+        g.drawTextCenter(c, al.name, cx, ty, tp, tw); ty += g.lineH(tp)
         val ap = g.text(g.fonts.semi, 14.5f, C.ACCENT2)
-        g.drawTextCenter(c, al.artist, cx, ty, ap, w - g.dp(48f)); ty += g.lineH(ap) + g.dp(2f)
-        val meta = listOf(if (al.year > 0) al.year.toString() else "", plural(al.tracks.size, "трек", "трека", "треков")).filter { it.isNotEmpty() }.joinToString(" · ")
-        g.drawTextCenter(c, meta, cx, ty, g.text(g.fonts.reg, 12.5f, C.TEXT2), w - g.dp(48f))
-        // position dots
-        val dots = min(n, 9)
-        if (n > 1) {
-            val dy = min(bottom - g.dp(14f), ty + g.dp(34f))
-            val p0 = (ci - dots / 2).coerceIn(0, n - dots)
-            for (k in 0 until dots) {
-                val idx = p0 + k
-                g.circle(c, cx + (k - (dots - 1) / 2f) * g.dp(11f), dy, if (idx == ci) g.dp(3.2f) else g.dp(2.2f), if (idx == ci) C.ACCENT else C.TEXT3)
-            }
+        g.drawTextCenter(c, al.artist, cx, ty, ap, tw); ty += g.lineH(ap) + g.dp(2f)
+        val t0 = al.tracks.firstOrNull()?.let { lib.tracks[it] }
+        val meta = listOf(if (al.year > 0) al.year.toString() else "", plural(al.tracks.size, "трек", "трека", "треков"), t0?.qualityLine ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+        g.drawTextCenter(c, meta, cx, ty, g.text(g.fonts.reg, 12.5f, C.TEXT2), tw); ty += g.dp(26f)
+        // play the centre album; a counter of where we are
+        val bh = g.dp(38f)
+        val pp = g.text(g.fonts.bold, 14f, C.TEXT)
+        val lbl = "Слушать"
+        val bw = pp.measureText(lbl) + g.dp(52f)
+        val bx = cx - bw / 2
+        g.rrect(c, bx, ty, bw, bh, bh / 2, if (pressedKey == "cfPlay") C.ACCENT2 else C.ACCENT)
+        g.iconPlay(c, bx + g.dp(22f), ty + bh / 2, g.dp(15f), false, C.TEXT)
+        g.drawText(c, lbl, bx + g.dp(36f), ty + (bh - g.lineH(pp)) / 2, pp)
+        hit(bx, ty, bx + bw, ty + bh, "cfPlay") { playList(al.tracks.map { lib.tracks[it] }, 0); openPlayer() }
+        val cp = g.text(g.fonts.reg, 12f, C.TEXT3)
+        g.drawTextRight(c, "${ci + 1} / $n", padR, ty + (bh - g.lineH(cp)) / 2, cp)
         }
         // input: drag to scroll, tap the middle to open, tap a side cover to bring it forward
-        val spacing = s * 0.30f
-        dragHit(0f, top, w, ty, "cf:$key") { x, _, phase ->
+        val spacing = s * 0.26f
+        dragHit(0f, top, w, floor + g.dp(8f), "cf:$key") { x, _, phase ->
             val now = SystemClock.uptimeMillis()
             when (phase) {
                 0 -> { cfDragKey = key; cfDragX0 = x; cfDragPos0 = st[0]; cfLastX = x; cfLastT = now; cfVel = 0f }
                 1 -> {
-                    st[0] = (cfDragPos0 - (x - cfDragX0) / spacing).coerceIn(-0.4f, n - 0.6f)
+                    st[0] = cfDragPos0 - (x - cfDragX0) / spacing
+                    if (!loop) st[0] = st[0].coerceIn(-0.4f, n - 0.6f)
                     st[1] = st[0]
                     val dtm = (now - cfLastT).coerceAtLeast(1)
                     val v = -(x - cfLastX) / spacing / (dtm / 1000f)
@@ -1265,17 +1374,18 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
                 }
                 else -> {
                     cfDragKey = null
+                    val cur = kotlin.math.round(st[0])
                     if (abs(x - cfDragX0) < slop && phase == 2) {
-                        val cur = kotlin.math.round(st[0]).toInt()
                         when {
-                            abs(x - cx) < s * 0.5f -> push(Scr(Kind.ALBUM, lib.albums[albums[cur.coerceIn(0, n - 1)]].key))
-                            x > cx -> st[1] = (cur + 1 + ((x - cx - s * 0.5f) / (s * 0.25f)).toInt()).coerceAtMost(n - 1).toFloat()
-                            else -> st[1] = (cur - 1 - ((cx - x - s * 0.5f) / (s * 0.25f)).toInt()).coerceAtLeast(0).toFloat()
+                            abs(x - cx) < s * 0.5f -> push(Scr(Kind.ALBUM, al.key))
+                            x > cx -> st[1] = cur + 1 + ((x - cx - s * 0.5f) / (s * 0.17f)).toInt()
+                            else -> st[1] = cur - 1 - ((cx - x - s * 0.5f) / (s * 0.17f)).toInt()
                         }
                     } else {
                         val fling = if (now - cfLastT > 120) 0f else cfVel * 0.22f
-                        st[1] = kotlin.math.round(st[0] + fling).coerceIn(0f, (n - 1).toFloat())
+                        st[1] = kotlin.math.round(st[0] + fling)
                     }
+                    if (!loop) st[1] = st[1].coerceIn(0f, (n - 1).toFloat())
                 }
             }
             invalidate()
