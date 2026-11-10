@@ -719,7 +719,10 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
 
     private fun gridCols(): Int {
         val avail = width - insetLeft - insetRight - g.dp(32f)
-        return max(2, ((avail + g.dp(14f)) / (g.dp(150f) + g.dp(14f))).toInt())
+        // CD and cassette cases are read by their spines and covers: three in a row even on a narrow screen
+        val minW = if (App.albumTheme == 1 || App.albumTheme == 2) g.dp(100f) else g.dp(150f)
+        val minCols = if (App.albumTheme == 1 || App.albumTheme == 2) 3 else 2
+        return max(minCols, ((avail + g.dp(14f)) / (minW + g.dp(14f))).toInt())
     }
 
     // ---------- quality filter ----------
@@ -854,7 +857,7 @@ class KassetaView(ctx: Context, private val host: Host) : View(ctx), Engine.List
         val l = lib
         val theme = App.albumTheme
         val cols = gridCols()
-        val gap = g.dp(if (theme == 0) 14f else 18f)
+        val gap = g.dp(if (theme == 0) 14f else 12f)
         val x0 = insetLeft + g.dp(16f)
         val cw = (width - insetLeft - insetRight - g.dp(32f) - gap * (cols - 1)) / cols
         val imgH = when (theme) { 1 -> cw * Cases.JEWEL_RATIO; 2 -> cw * Cases.TAPE_RATIO; else -> cw }
